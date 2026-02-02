@@ -58,7 +58,43 @@ This project is a Node.js application that interfaces with the Monzo API to mana
 
 ```bash
    node tests/testStoreDailyBalance.js
+   node tests/testStoreTransactions.js
+   node tests/exportAllData.js
 ```
+
+## Local OAuth testing checklist
+1. Ensure Postgres is running and the `monzo_db` database (with the `monzo_auth` table) is created, since both session storage and token persistence rely on it.
+2. Create a `.env` file with:
+   - `POSTGRES_USER` and `POSTGRES_PASSWORD`
+   - `MONZO_CLIENT_ID`, `MONZO_CLIENT_SECRET`, and `MONZO_REDIRECT_URI`
+3. Start the server:
+
+```bash
+   node index.js
+```
+
+4. Open the auth route in a browser to start OAuth:
+
+```
+   http://localhost:54000/auth/auth
+```
+
+5. Sign in to Monzo and approve access. You should be redirected to `/auth/callback` and see confirmation that tokens were saved.
+6. (Optional) Hit `/auth/refreshToken` to verify token refresh works:
+
+```
+   http://localhost:54000/auth/refreshToken
+```
+
+## Viewing stored data (GUI)
+This project does not ship with a built-in web UI/GUI for viewing stored Monzo data. Data is stored in PostgreSQL tables, and you can access it via SQL clients (e.g., `psql`, pgAdmin) or export tables to CSV using `exportTx.js`/`exportToCSV.js` and open the CSV files locally.
+
+## Exporting transactions from Monzo
+1. Fetch and store transactions from the Monzo API into the database using `fetchAndStoreAllTransactions(accountId)` in `modules/monzoAPI.js`. This function paginates through the Monzo transactions endpoint and inserts each transaction into the `monzo_transactions` table.
+2. Export the stored transactions to CSV by invoking `exportToCSV('monzo_transactions')` (or updating `exportTx.js` to pass `monzo_transactions` as the table name). The CSV will be written to `exports/monzo_transactions_export.csv`.
+
+## Exporting all data safely
+Run `node tests/exportAllData.js` to export every PostgreSQL table to `exports/<table>_export.csv`. This script mirrors the `exportTx.js` CSV logic but redacts credential-like fields (for example, `monzo_auth.monzo_val` and any column containing `token`, `secret`, or `password`) so auth credentials are not written to disk.
 
 
 ## Modules

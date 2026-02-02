@@ -84,6 +84,13 @@ This project is a Node.js application that interfaces with the Monzo API to mana
    http://localhost:54000/auth/refreshToken
 ```
 
+## Viewing stored data (GUI)
+This project does not ship with a built-in web UI/GUI for viewing stored Monzo data. Data is stored in PostgreSQL tables, and you can access it via SQL clients (e.g., `psql`, pgAdmin) or export tables to CSV using `exportTx.js`/`exportToCSV.js` and open the CSV files locally.
+
+## Exporting transactions from Monzo
+1. Fetch and store transactions from the Monzo API into the database using `fetchAndStoreAllTransactions(accountId)` in `modules/monzoAPI.js`. This function paginates through the Monzo transactions endpoint and inserts each transaction into the `monzo_transactions` table.
+2. Export the stored transactions to CSV by invoking `exportToCSV('monzo_transactions')` (or updating `exportTx.js` to pass `monzo_transactions` as the table name). The CSV will be written to `exports/monzo_transactions_export.csv`.
+
 
 ## Modules
 - `index.js`: Main entry point for the application.

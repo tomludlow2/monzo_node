@@ -105,6 +105,30 @@ Use `modules/feed.js` to create custom Monzo feed items for the account holder. 
 
 You can test this with `node tests/testCreateFeedItem.js` or by sending a JSON payload to `http://localhost:54000/feed/item`.
 
+## Receipts
+The receipts module (`modules/receipts.js`) can create, retrieve, and delete transaction receipts via the Monzo API. Receipts use a JSON payload and are tied to a transaction ID plus an `external_id` idempotency key. The module persists this `external_id` in PostgreSQL so you can reuse it later for edits without generating duplicates.
+
+### Receipt storage (idempotency)
+The module stores receipts in a `monzo_receipts` table that maps each `transaction_id` to a stable `external_id` and keeps the last payload used. The table is created automatically if missing, but you can provision it manually with:
+
+```sql
+CREATE TABLE monzo_receipts (
+    transaction_id TEXT PRIMARY KEY,
+    external_id TEXT NOT NULL UNIQUE,
+    receipt_id TEXT,
+    payload JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+### Creating a receipt for the most recent transaction
+Run the helper script below to fetch the most recent transaction from the local database, split the total into two items, print the payload for debugging, and create the receipt:
+
+```bash
+node tests/createReceiptForTransaction.js
+```
+
 
 ## Modules
 2. You can also manually test functions by running corresponding test scripts located in the tests directory:

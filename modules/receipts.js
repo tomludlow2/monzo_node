@@ -35,13 +35,33 @@ const DISALLOWED_DESCRIPTION_KEYWORDS = [
 async function ensureReceiptsTable() {
     await pool.query(
         `CREATE TABLE IF NOT EXISTS monzo_receipts (
-            transaction_id TEXT PRIMARY KEY,
-            external_id TEXT NOT NULL UNIQUE,
-            receipt_id TEXT,
-            payload JSONB,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            transaction_id TEXT PRIMARY KEY
         )`
+    );
+
+    await pool.query(
+        `ALTER TABLE monzo_receipts
+            ADD COLUMN IF NOT EXISTS external_id TEXT,
+            ADD COLUMN IF NOT EXISTS receipt_id TEXT,
+            ADD COLUMN IF NOT EXISTS payload JSONB,
+            ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+    );
+
+    await pool.query(
+        `UPDATE monzo_receipts
+         SET external_id = CONCAT('receipt-', transaction_id)
+         WHERE external_id IS NULL`
+    );
+
+    await pool.query(
+        `ALTER TABLE monzo_receipts
+            ALTER COLUMN external_id SET NOT NULL`
+    );
+
+    await pool.query(
+        `ALTER TABLE monzo_receipts
+            ADD CONSTRAINT IF NOT EXISTS monzo_receipts_external_id_unique UNIQUE (external_id)`
     );
 }
 

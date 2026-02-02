@@ -8,6 +8,7 @@ const { Pool } = require('pg');
 // Import custom modules
 const auth = require('./modules/auth');  // Auth routes and functions
 const cronScheduler = require('./modules/cronScheduler');  // Task scheduling
+const feed = require('./modules/feed'); // Feed item routes
 
 // Initialize Express app
 const app = express();
@@ -32,6 +33,7 @@ app.use(session({
 
 // Route setup
 app.use('/auth', auth);  // Authentication route
+app.use('/feed', feed.router); // Feed item endpoint
 // Additional routes can be added as more modules are created (e.g., transactions, accounts)
 
 // Start the server

@@ -70,22 +70,47 @@ function buildFeedPayload({
 }
 
 async function createFeedItem(options) {
-    const payload = buildFeedPayload(options);
+  const payload = buildFeedPayload(options);
 
-    if (!payload.account_id) {
-        throw new Error('Account ID is required to create a feed item.');
-    }
+  if (!payload.account_id) {
+    throw new Error("Account ID is required to create a feed item.");
+  }
 
-    const accessToken = await ensureValidAccessToken();
-    const response = await axios.post('https://api.monzo.com/feed', payload, {
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-        }
-    });
+  // Monzo expects form params (params[title], params[image_url], etc.)
+  const form = new URLSearchParams();
+  form.set("account_id", payload.account_id);
+  form.set("type", payload.type || "basic");
+  if (payload.url) form.set("url", payload.url);
 
-    return response.data;
+  // Flatten payload.params -> params[...]
+  if (!payload.params?.title) throw new Error("Feed item requires params.title");
+  if (!payload.params?.image_url) throw new Error("Feed item requires params.image_url");
+
+  for (const [k, v] of Object.entries(payload.params || {})) {
+    if (v !== undefined && v !== null) form.set(`params[${k}]`, String(v));
+  }
+
+  const accessToken = await ensureValidAccessToken();
+
+  const response = await axios.post("https://api.monzo.com/feed", form, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    // Helpful for debugging: surface Monzo's error payload
+    validateStatus: () => true,
+  });
+
+  if (response.status >= 400) {
+    // Monzo usually returns a JSON body like { error: "...", error_description: "..." }
+    throw new Error(
+      `Monzo /feed failed (${response.status}): ${JSON.stringify(response.data)}`
+    );
+  }
+
+  return response.data;
 }
+
 
 router.post('/item', async (req, res) => {
     try {

@@ -19,7 +19,11 @@ async function testCreateFeedItem() {
 
         console.log('Feed item created:', response);
     } catch (error) {
-        console.error('Error creating feed item:', error.message);
+      console.error(
+        "Error creating feed item:",
+        error.response?.status,
+        error.response?.data || error.message
+      );
     }
 }
 

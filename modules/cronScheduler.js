@@ -39,6 +39,17 @@ function initializeTasks() {
             console.error('Error during daily balance storage:', error.message);
         }
     });
+
+    // Task 3: Schedule daily pots balance storage at 6:01 AM
+    cron.schedule('1 6 * * *', async () => {
+        try {
+            console.log('Running daily pots balance storage...');
+            const pots = await monzoAPI.listPots(); // Get the pots list
+            await monzoAPI.storeDailyPotsBalance(pots); // Store the pots balances
+        } catch (error) {
+            console.error('Error during daily pots balance storage:', error.message);
+        }
+    });
 }
 
 // Export the initializeTasks function

@@ -1,5 +1,7 @@
 .env
-exports/*
+backup/
+exports/
+node_modules/
 package-lock.json
 package.json
-node-modules/*
+

@@ -60,6 +60,30 @@ This project is a Node.js application that interfaces with the Monzo API to mana
    node tests/testStoreDailyBalance.js
 ```
 
+## Local OAuth testing checklist
+1. Ensure Postgres is running and the `monzo_db` database (with the `monzo_auth` table) is created, since both session storage and token persistence rely on it.
+2. Create a `.env` file with:
+   - `POSTGRES_USER` and `POSTGRES_PASSWORD`
+   - `MONZO_CLIENT_ID`, `MONZO_CLIENT_SECRET`, and `MONZO_REDIRECT_URI`
+3. Start the server:
+
+```bash
+   node index.js
+```
+
+4. Open the auth route in a browser to start OAuth:
+
+```
+   http://localhost:54000/auth/auth
+```
+
+5. Sign in to Monzo and approve access. You should be redirected to `/auth/callback` and see confirmation that tokens were saved.
+6. (Optional) Hit `/auth/refreshToken` to verify token refresh works:
+
+```
+   http://localhost:54000/auth/refreshToken
+```
+
 
 ## Modules
 - `index.js`: Main entry point for the application.

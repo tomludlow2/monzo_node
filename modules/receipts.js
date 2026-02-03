@@ -171,7 +171,7 @@ async function upsertReceiptRecord({ transactionId, externalId, receiptId = null
     );
 }
 
-async function createTransactionReceipt({ transactionId, externalId, total, currency, items }) {
+async function createTransactionReceipt({ transactionId, externalId, total, currency, items, debug = false }) {
     if (!transactionId) {
         throw new Error('transactionId is required to create a receipt.');
     }
@@ -192,17 +192,37 @@ async function createTransactionReceipt({ transactionId, externalId, total, curr
         external_id: resolvedExternalId,
         total,
         currency,
-        items
+        items: items.map(item => ({
+            ...item,
+            tax: item.tax ?? 0
+        }))
     };
 
     const accessToken = await ensureValidAccessToken();
 
+    const url = 'https://api.monzo.com/transaction-receipts';
+    const headers = {
+        Authorization: `Bearer ${accessToken}`
+    };
+
+    if (debug) {
+        console.log('Monzo receipt request:');
+        console.log(
+            JSON.stringify(
+                {
+                    method: 'PUT',
+                    url,
+                    headers,
+                    data: payload
+                },
+                null,
+                2
+            )
+        );
+    }
+
     try {
-        const response = await axios.put('https://api.monzo.com/transaction-receipts', payload, {
-            headers: {
-                Authorization: `Bearer ${accessToken}`
-            }
-        });
+        const response = await axios.put(url, payload, { headers });
 
         const receiptId = response.data && response.data.receipt_id ? response.data.receipt_id : null;
         await upsertReceiptRecord({
@@ -240,24 +260,57 @@ async function getReceiptByExternalId(externalId) {
     }
 }
 
-async function deleteReceiptByExternalId(externalId) {
+async function deleteReceiptByExternalId(externalId, options = {}) {
     if (!externalId) {
         throw new Error('externalId is required to delete a receipt.');
     }
 
     const accessToken = await ensureValidAccessToken();
+    const { debug = false, total, currency = 'GBP' } = options;
+    const url = 'https://api.monzo.com/transaction-receipts';
+    const headers = {
+        Authorization: `Bearer ${accessToken}`
+    };
+    if (!Number.isInteger(total) || total <= 0) {
+        throw new Error('total is required to replace a receipt and must be a positive integer.');
+    }
+
+    const payload = {
+        external_id: externalId,
+        total,
+        currency,
+        items: [
+            {
+                description: 'Generic Receipt',
+                quantity: 1,
+                unit: '',
+                amount: total,
+                currency,
+                tax: 0
+            }
+        ]
+    };
+
+    if (debug) {
+        console.log('Monzo receipt replace request:');
+        console.log(
+            JSON.stringify(
+                {
+                    method: 'PUT',
+                    url,
+                    headers,
+                    data: payload
+                },
+                null,
+                2
+            )
+        );
+    }
 
     try {
-        await axios.delete('https://api.monzo.com/transaction-receipts', {
-            headers: {
-                Authorization: `Bearer ${accessToken}`
-            },
-            params: {
-                external_id: externalId
-            }
-        });
+        await axios.put(url, payload, { headers });
     } catch (error) {
-        throw new Error(formatMonzoErrorMessage(error, 'Delete receipt'));
+        throw new Error(formatMonzoErrorMessage(error, 'Replace receipt'));
     }
 }
 
@@ -279,6 +332,9 @@ function isReceiptEligible(transaction) {
     }
 
     const description = (transaction.description || '').toLowerCase();
+    if (description.startsWith('pot_')) {
+        return false;
+    }
     if (DISALLOWED_DESCRIPTION_KEYWORDS.some(keyword => description.includes(keyword))) {
         return false;
     }

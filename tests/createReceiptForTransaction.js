@@ -1,8 +1,7 @@
 const { Pool } = require('pg');
-const {
-    createTransactionReceipt,
-    getOrCreateReceiptExternalId
-} = require('../modules/receipts');
+const fs = require('fs');
+const path = require('path');
+const { createTransactionReceipt, getOrCreateReceiptExternalId } = require('../modules/receipts');
 require('dotenv').config();
 
 const pool = new Pool({
@@ -13,67 +12,207 @@ const pool = new Pool({
     port: 5432
 });
 
-async function createReceiptForLatestTransaction() {
+const EXPORT_DIR = path.join(__dirname, '../exports');
+const EXPORT_FILE = path.join(EXPORT_DIR, 'monzo_test_receipt_types.csv');
+
+function escapeCsvValue(value) {
+    if (value === null || value === undefined) {
+        return '';
+    }
+
+    const stringValue = String(value);
+    if (/[",\n]/.test(stringValue)) {
+        return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+
+    return stringValue;
+}
+
+function formatTransactionLabel(transaction) {
+    const amount = Number(transaction.amount);
+    const description = transaction.description || 'No description';
+    const date = transaction.date_created
+        ? new Date(transaction.date_created).toISOString()
+        : 'Unknown date';
+
+    return `${description} | amount: ${amount} | category: ${transaction.category || 'n/a'} | date: ${date}`;
+}
+
+async function createReceiptForLatestTransactions() {
     try {
         const { rows } = await pool.query(
-            `SELECT transaction_id, amount
+            `SELECT transaction_id, amount, category, description, date_created
              FROM monzo_transactions
              ORDER BY date_created DESC
-             LIMIT 1`
+             LIMIT 30`
         );
 
         if (rows.length === 0) {
             throw new Error('No transactions found in monzo_transactions.');
         }
 
-        const { transaction_id: transactionId, amount } = rows[0];
-        const total = Math.abs(Number(amount));
+        console.log('Testing receipt creation for the most recent 30 transactions...');
 
-        if (!Number.isInteger(total) || total <= 0) {
-            throw new Error(`Latest transaction amount is invalid for receipt creation: ${amount}`);
+        if (!fs.existsSync(EXPORT_DIR)) {
+            fs.mkdirSync(EXPORT_DIR, { recursive: true });
         }
 
-        const halfAmount = Math.floor(total / 2);
-        const payload = {
-            transaction_id: transactionId,
-            external_id: await getOrCreateReceiptExternalId(transactionId),
-            total,
-            currency: 'GBP',
-            items: [
-                {
-                    description: 'Item 1 on Receipt',
-                    quantity: 1,
-                    unit: '',
-                    amount: halfAmount,
-                    currency: 'GBP'
-                },
-                {
-                    description: 'Item 2 on Receipt',
-                    quantity: 1,
-                    unit: '',
-                    amount: total - halfAmount,
-                    currency: 'GBP'
-                }
+        const csvRows = [
+            [
+                'transaction_id',
+                'amount',
+                'category',
+                'description',
+                'date_created',
+                'status',
+                'error'
             ]
-        };
+        ];
 
-        console.log('Receipt payload to send to Monzo:');
-        console.log(JSON.stringify(payload, null, 2));
+        let successCount = 0;
+        let failureCount = 0;
+        let skippedCount = 0;
 
-        const response = await createTransactionReceipt({
-            transactionId: payload.transaction_id,
-            externalId: payload.external_id,
-            total: payload.total,
-            currency: payload.currency,
-            items: payload.items
-        });
+        for (const transaction of rows) {
+            const { transaction_id: transactionId, amount } = transaction;
+            const total = Math.abs(Number(amount));
+            const label = formatTransactionLabel(transaction);
 
-        console.log('Monzo receipt response:', response || '(empty response)');
+            const descriptionLower = (transaction.description || '').toLowerCase();
+            const category = transaction.category || '';
+
+            if (!Number.isInteger(total) || total <= 0) {
+                const errorMessage = `Invalid amount for receipt creation: ${amount}`;
+                console.log(`⚠️ ${transactionId} | ${label} | skipped | ${errorMessage}`);
+                csvRows.push([
+                    transactionId,
+                    amount,
+                    transaction.category,
+                    transaction.description,
+                    transaction.date_created,
+                    'skipped',
+                    errorMessage
+                ]);
+                skippedCount += 1;
+                continue;
+            }
+
+            if (Number(amount) > 0) {
+                const errorMessage = 'Skipped credit/inbound transaction.';
+                console.log(`⚠️ ${transactionId} | ${label} | skipped | ${errorMessage}`);
+                csvRows.push([
+                    transactionId,
+                    amount,
+                    transaction.category,
+                    transaction.description,
+                    transaction.date_created,
+                    'skipped',
+                    errorMessage
+                ]);
+                skippedCount += 1;
+                continue;
+            }
+
+            if (['transfers', 'savings', 'bills'].includes(category)) {
+                const errorMessage = `Skipped disallowed category: ${category || 'unknown'}.`;
+                console.log(`⚠️ ${transactionId} | ${label} | skipped | ${errorMessage}`);
+                csvRows.push([
+                    transactionId,
+                    amount,
+                    transaction.category,
+                    transaction.description,
+                    transaction.date_created,
+                    'skipped',
+                    errorMessage
+                ]);
+                skippedCount += 1;
+                continue;
+            }
+
+            if (descriptionLower.startsWith('pot_')) {
+                const errorMessage = 'Skipped pot transaction description.';
+                console.log(`⚠️ ${transactionId} | ${label} | skipped | ${errorMessage}`);
+                csvRows.push([
+                    transactionId,
+                    amount,
+                    transaction.category,
+                    transaction.description,
+                    transaction.date_created,
+                    'skipped',
+                    errorMessage
+                ]);
+                skippedCount += 1;
+                continue;
+            }
+
+            const payload = {
+                transaction_id: transactionId,
+                external_id: await getOrCreateReceiptExternalId(transactionId),
+                total,
+                currency: 'GBP',
+                items: [
+                    {
+                        description: 'Single item receipt',
+                        quantity: 1,
+                        unit: '',
+                        amount: total,
+                        currency: 'GBP',
+                        tax: 0
+                    }
+                ]
+            };
+
+            try {
+                await createTransactionReceipt({
+                    transactionId: payload.transaction_id,
+                    externalId: payload.external_id,
+                    total: payload.total,
+                    currency: payload.currency,
+                    items: payload.items
+                });
+
+                console.log(`✅ ${transactionId} | ${label} | receipt created`);
+                csvRows.push([
+                    transactionId,
+                    amount,
+                    transaction.category,
+                    transaction.description,
+                    transaction.date_created,
+                    'success',
+                    ''
+                ]);
+                successCount += 1;
+            } catch (error) {
+                const errorMessage = error.message || String(error);
+                console.log(`❌ ${transactionId} | ${label} | ${errorMessage}`);
+                csvRows.push([
+                    transactionId,
+                    amount,
+                    transaction.category,
+                    transaction.description,
+                    transaction.date_created,
+                    'failed',
+                    errorMessage
+                ]);
+                failureCount += 1;
+            }
+        }
+
+        const csvContent = csvRows
+            .map(row => row.map(escapeCsvValue).join(','))
+            .join('\n');
+
+        fs.writeFileSync(EXPORT_FILE, csvContent, 'utf8');
+
+        console.log(
+            `Receipt test summary: ${successCount} succeeded, ${failureCount} failed, ${skippedCount} skipped.`
+        );
+        console.log(`Exported results to ${EXPORT_FILE}`);
     } catch (error) {
-        console.error('Error creating receipt for latest transaction:', error.message);
+        console.error('Error creating receipts for latest transactions:', error.message);
     } finally {
         await pool.end();
     }
 }
 
-createReceiptForLatestTransaction();
+createReceiptForLatestTransactions();

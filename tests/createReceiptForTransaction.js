@@ -156,6 +156,7 @@ async function createReceiptForLatestTransactions() {
     } catch (error) {
         console.error('Error creating receipts for latest transactions:', error.message);
     } finally {
+        rl.close();
         await pool.end();
     }
 }

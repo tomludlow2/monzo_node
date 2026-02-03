@@ -71,25 +71,77 @@ async function createReceiptForLatestTransactions() {
 
         let successCount = 0;
         let failureCount = 0;
+        let skippedCount = 0;
 
         for (const transaction of rows) {
             const { transaction_id: transactionId, amount } = transaction;
             const total = Math.abs(Number(amount));
             const label = formatTransactionLabel(transaction);
 
+            const descriptionLower = (transaction.description || '').toLowerCase();
+            const category = transaction.category || '';
+
             if (!Number.isInteger(total) || total <= 0) {
                 const errorMessage = `Invalid amount for receipt creation: ${amount}`;
-                console.log(`❌ ${transactionId} | ${label} | ${errorMessage}`);
+                console.log(`⚠️ ${transactionId} | ${label} | skipped | ${errorMessage}`);
                 csvRows.push([
                     transactionId,
                     amount,
                     transaction.category,
                     transaction.description,
                     transaction.date_created,
-                    'invalid',
+                    'skipped',
                     errorMessage
                 ]);
-                failureCount += 1;
+                skippedCount += 1;
+                continue;
+            }
+
+            if (Number(amount) > 0) {
+                const errorMessage = 'Skipped credit/inbound transaction.';
+                console.log(`⚠️ ${transactionId} | ${label} | skipped | ${errorMessage}`);
+                csvRows.push([
+                    transactionId,
+                    amount,
+                    transaction.category,
+                    transaction.description,
+                    transaction.date_created,
+                    'skipped',
+                    errorMessage
+                ]);
+                skippedCount += 1;
+                continue;
+            }
+
+            if (['transfers', 'savings', 'bills'].includes(category)) {
+                const errorMessage = `Skipped disallowed category: ${category || 'unknown'}.`;
+                console.log(`⚠️ ${transactionId} | ${label} | skipped | ${errorMessage}`);
+                csvRows.push([
+                    transactionId,
+                    amount,
+                    transaction.category,
+                    transaction.description,
+                    transaction.date_created,
+                    'skipped',
+                    errorMessage
+                ]);
+                skippedCount += 1;
+                continue;
+            }
+
+            if (descriptionLower.startsWith('pot_')) {
+                const errorMessage = 'Skipped pot transaction description.';
+                console.log(`⚠️ ${transactionId} | ${label} | skipped | ${errorMessage}`);
+                csvRows.push([
+                    transactionId,
+                    amount,
+                    transaction.category,
+                    transaction.description,
+                    transaction.date_created,
+                    'skipped',
+                    errorMessage
+                ]);
+                skippedCount += 1;
                 continue;
             }
 
@@ -104,7 +156,8 @@ async function createReceiptForLatestTransactions() {
                         quantity: 1,
                         unit: '',
                         amount: total,
-                        currency: 'GBP'
+                        currency: 'GBP',
+                        tax: 0
                     }
                 ]
             };
@@ -151,7 +204,9 @@ async function createReceiptForLatestTransactions() {
 
         fs.writeFileSync(EXPORT_FILE, csvContent, 'utf8');
 
-        console.log(`Receipt test summary: ${successCount} succeeded, ${failureCount} failed.`);
+        console.log(
+            `Receipt test summary: ${successCount} succeeded, ${failureCount} failed, ${skippedCount} skipped.`
+        );
         console.log(`Exported results to ${EXPORT_FILE}`);
     } catch (error) {
         console.error('Error creating receipts for latest transactions:', error.message);

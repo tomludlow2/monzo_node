@@ -192,7 +192,10 @@ async function createTransactionReceipt({ transactionId, externalId, total, curr
         external_id: resolvedExternalId,
         total,
         currency,
-        items
+        items: items.map(item => ({
+            ...item,
+            tax: item.tax ?? 0
+        }))
     };
 
     const accessToken = await ensureValidAccessToken();
@@ -263,22 +266,40 @@ async function deleteReceiptByExternalId(externalId, options = {}) {
     }
 
     const accessToken = await ensureValidAccessToken();
-    const { debug = false } = options;
+    const { debug = false, total, currency = 'GBP' } = options;
     const url = 'https://api.monzo.com/transaction-receipts';
     const headers = {
         Authorization: `Bearer ${accessToken}`
     };
-    const params = { external_id: externalId };
+    if (!Number.isInteger(total) || total <= 0) {
+        throw new Error('total is required to replace a receipt and must be a positive integer.');
+    }
+
+    const payload = {
+        external_id: externalId,
+        total,
+        currency,
+        items: [
+            {
+                description: 'Generic Receipt',
+                quantity: 1,
+                unit: '',
+                amount: total,
+                currency,
+                tax: 0
+            }
+        ]
+    };
 
     if (debug) {
-        console.log('Monzo receipt delete request:');
+        console.log('Monzo receipt replace request:');
         console.log(
             JSON.stringify(
                 {
-                    method: 'DELETE',
+                    method: 'PUT',
                     url,
                     headers,
-                    params
+                    data: payload
                 },
                 null,
                 2
@@ -287,12 +308,9 @@ async function deleteReceiptByExternalId(externalId, options = {}) {
     }
 
     try {
-        await axios.delete(url, {
-            headers,
-            params
-        });
+        await axios.put(url, payload, { headers });
     } catch (error) {
-        throw new Error(formatMonzoErrorMessage(error, 'Delete receipt'));
+        throw new Error(formatMonzoErrorMessage(error, 'Replace receipt'));
     }
 }
 
@@ -314,6 +332,9 @@ function isReceiptEligible(transaction) {
     }
 
     const description = (transaction.description || '').toLowerCase();
+    if (description.startsWith('pot_')) {
+        return false;
+    }
     if (DISALLOWED_DESCRIPTION_KEYWORDS.some(keyword => description.includes(keyword))) {
         return false;
     }

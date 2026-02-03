@@ -74,7 +74,22 @@ async function deleteReceiptFromSelection() {
             throw new Error('Selected receipt does not have an external_id.');
         }
 
-        await deleteReceiptByExternalId(selectedReceipt.external_id, { debug: true });
+        const { rows: transactionRows } = await pool.query(
+            'SELECT amount FROM monzo_transactions WHERE transaction_id = $1',
+            [selectedReceipt.transaction_id]
+        );
+        const amount = transactionRows.length > 0 ? transactionRows[0].amount : null;
+        const receiptTotal = Math.abs(Number(amount));
+
+        if (!Number.isInteger(receiptTotal) || receiptTotal <= 0) {
+            throw new Error(`Invalid transaction amount for receipt replacement: ${amount}`);
+        }
+
+        await deleteReceiptByExternalId(selectedReceipt.external_id, {
+            debug: true,
+            total: receiptTotal,
+            currency: 'GBP'
+        });
 
         console.log(`Receipt deleted for external_id ${selectedReceipt.external_id}.`);
     } catch (error) {

@@ -171,7 +171,7 @@ async function upsertReceiptRecord({ transactionId, externalId, receiptId = null
     );
 }
 
-async function createTransactionReceipt({ transactionId, externalId, total, currency, items }) {
+async function createTransactionReceipt({ transactionId, externalId, total, currency, items, debug = false }) {
     if (!transactionId) {
         throw new Error('transactionId is required to create a receipt.');
     }
@@ -197,12 +197,29 @@ async function createTransactionReceipt({ transactionId, externalId, total, curr
 
     const accessToken = await ensureValidAccessToken();
 
+    const url = 'https://api.monzo.com/transaction-receipts';
+    const headers = {
+        Authorization: `Bearer ${accessToken}`
+    };
+
+    if (debug) {
+        console.log('Monzo receipt request:');
+        console.log(
+            JSON.stringify(
+                {
+                    method: 'PUT',
+                    url,
+                    headers,
+                    data: payload
+                },
+                null,
+                2
+            )
+        );
+    }
+
     try {
-        const response = await axios.put('https://api.monzo.com/transaction-receipts', payload, {
-            headers: {
-                Authorization: `Bearer ${accessToken}`
-            }
-        });
+        const response = await axios.put(url, payload, { headers });
 
         const receiptId = response.data && response.data.receipt_id ? response.data.receipt_id : null;
         await upsertReceiptRecord({

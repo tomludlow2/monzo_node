@@ -257,21 +257,39 @@ async function getReceiptByExternalId(externalId) {
     }
 }
 
-async function deleteReceiptByExternalId(externalId) {
+async function deleteReceiptByExternalId(externalId, options = {}) {
     if (!externalId) {
         throw new Error('externalId is required to delete a receipt.');
     }
 
     const accessToken = await ensureValidAccessToken();
+    const { debug = false } = options;
+    const url = 'https://api.monzo.com/transaction-receipts';
+    const headers = {
+        Authorization: `Bearer ${accessToken}`
+    };
+    const params = { external_id: externalId };
+
+    if (debug) {
+        console.log('Monzo receipt delete request:');
+        console.log(
+            JSON.stringify(
+                {
+                    method: 'DELETE',
+                    url,
+                    headers,
+                    params
+                },
+                null,
+                2
+            )
+        );
+    }
 
     try {
-        await axios.delete('https://api.monzo.com/transaction-receipts', {
-            headers: {
-                Authorization: `Bearer ${accessToken}`
-            },
-            params: {
-                external_id: externalId
-            }
+        await axios.delete(url, {
+            headers,
+            params
         });
     } catch (error) {
         throw new Error(formatMonzoErrorMessage(error, 'Delete receipt'));

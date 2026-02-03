@@ -1,10 +1,7 @@
 const { Pool } = require('pg');
-const {
-    createTransactionReceipt,
-    getOrCreateReceiptExternalId,
-    isReceiptEligible
-} = require('../modules/receipts');
-const readline = require('readline');
+const fs = require('fs');
+const path = require('path');
+const { createTransactionReceipt, getOrCreateReceiptExternalId } = require('../modules/receipts');
 require('dotenv').config();
 
 const pool = new Pool({
@@ -15,115 +12,153 @@ const pool = new Pool({
     port: 5432
 });
 
-function createPrompt() {
-    return readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
+const EXPORT_DIR = path.join(__dirname, '../exports');
+const EXPORT_FILE = path.join(EXPORT_DIR, 'monzo_test_receipt_types.csv');
+
+function escapeCsvValue(value) {
+    if (value === null || value === undefined) {
+        return '';
+    }
+
+    const stringValue = String(value);
+    if (/[",\n]/.test(stringValue)) {
+        return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+
+    return stringValue;
 }
 
-function askQuestion(prompt, rl) {
-    return new Promise(resolve => {
-        rl.question(prompt, answer => resolve(answer));
-    });
-}
-
-function formatTransactionLabel(transaction, index) {
+function formatTransactionLabel(transaction) {
     const amount = Number(transaction.amount);
     const description = transaction.description || 'No description';
     const date = transaction.date_created
         ? new Date(transaction.date_created).toISOString()
         : 'Unknown date';
 
-    return `${index + 1}. ${description} | amount: ${amount} | category: ${transaction.category || 'n/a'} | date: ${date}`;
+    return `${description} | amount: ${amount} | category: ${transaction.category || 'n/a'} | date: ${date}`;
 }
 
-async function selectTransaction(transactions, rl) {
-    const selectionPrompt = 'Select a transaction to create a receipt for (1-5): ';
-
-    while (true) {
-        const answer = await askQuestion(selectionPrompt, rl);
-        const choice = Number.parseInt(answer, 10);
-
-        if (Number.isInteger(choice) && choice >= 1 && choice <= transactions.length) {
-            return transactions[choice - 1];
-        }
-
-        console.log(`Invalid selection "${answer}". Please enter a number between 1 and ${transactions.length}.`);
-    }
-}
-
-async function createReceiptForLatestTransaction() {
-    const rl = createPrompt();
-
+async function createReceiptForLatestTransactions() {
     try {
         const { rows } = await pool.query(
             `SELECT transaction_id, amount, category, description, date_created
              FROM monzo_transactions
              ORDER BY date_created DESC
-             LIMIT 5`
+             LIMIT 30`
         );
 
         if (rows.length === 0) {
             throw new Error('No transactions found in monzo_transactions.');
         }
 
-        console.log('Most recent transactions:');
-        rows.forEach((transaction, index) => {
-            console.log(formatTransactionLabel(transaction, index));
-        });
+        console.log('Testing receipt creation for the most recent 30 transactions...');
 
-        const selectedTransaction = await selectTransaction(rows, rl);
-        const { transaction_id: transactionId, amount } = selectedTransaction;
-        const total = Math.abs(Number(amount));
-
-        if (!Number.isInteger(total) || total <= 0) {
-            throw new Error(`Latest transaction amount is invalid for receipt creation: ${amount}`);
+        if (!fs.existsSync(EXPORT_DIR)) {
+            fs.mkdirSync(EXPORT_DIR, { recursive: true });
         }
 
-        const halfAmount = Math.floor(total / 2);
-        const payload = {
-            transaction_id: transactionId,
-            external_id: await getOrCreateReceiptExternalId(transactionId),
-            total,
-            currency: 'GBP',
-            items: [
-                {
-                    description: 'Item 1 on Receipt',
-                    quantity: 1,
-                    unit: '',
-                    amount: halfAmount,
-                    currency: 'GBP'
-                },
-                {
-                    description: 'Item 2 on Receipt',
-                    quantity: 1,
-                    unit: '',
-                    amount: total - halfAmount,
-                    currency: 'GBP'
-                }
+        const csvRows = [
+            [
+                'transaction_id',
+                'amount',
+                'category',
+                'description',
+                'date_created',
+                'status',
+                'error'
             ]
-        };
+        ];
 
-        console.log('Receipt payload to send to Monzo:');
-        console.log(JSON.stringify(payload, null, 2));
+        let successCount = 0;
+        let failureCount = 0;
 
-        const response = await createTransactionReceipt({
-            transactionId: payload.transaction_id,
-            externalId: payload.external_id,
-            total: payload.total,
-            currency: payload.currency,
-            items: payload.items,
-            debug: true
-        });
+        for (const transaction of rows) {
+            const { transaction_id: transactionId, amount } = transaction;
+            const total = Math.abs(Number(amount));
+            const label = formatTransactionLabel(transaction);
 
-        console.log('Monzo receipt response:', response || '(empty response)');
+            if (!Number.isInteger(total) || total <= 0) {
+                const errorMessage = `Invalid amount for receipt creation: ${amount}`;
+                console.log(`❌ ${transactionId} | ${label} | ${errorMessage}`);
+                csvRows.push([
+                    transactionId,
+                    amount,
+                    transaction.category,
+                    transaction.description,
+                    transaction.date_created,
+                    'invalid',
+                    errorMessage
+                ]);
+                failureCount += 1;
+                continue;
+            }
+
+            const payload = {
+                transaction_id: transactionId,
+                external_id: await getOrCreateReceiptExternalId(transactionId),
+                total,
+                currency: 'GBP',
+                items: [
+                    {
+                        description: 'Single item receipt',
+                        quantity: 1,
+                        unit: '',
+                        amount: total,
+                        currency: 'GBP'
+                    }
+                ]
+            };
+
+            try {
+                await createTransactionReceipt({
+                    transactionId: payload.transaction_id,
+                    externalId: payload.external_id,
+                    total: payload.total,
+                    currency: payload.currency,
+                    items: payload.items
+                });
+
+                console.log(`✅ ${transactionId} | ${label} | receipt created`);
+                csvRows.push([
+                    transactionId,
+                    amount,
+                    transaction.category,
+                    transaction.description,
+                    transaction.date_created,
+                    'success',
+                    ''
+                ]);
+                successCount += 1;
+            } catch (error) {
+                const errorMessage = error.message || String(error);
+                console.log(`❌ ${transactionId} | ${label} | ${errorMessage}`);
+                csvRows.push([
+                    transactionId,
+                    amount,
+                    transaction.category,
+                    transaction.description,
+                    transaction.date_created,
+                    'failed',
+                    errorMessage
+                ]);
+                failureCount += 1;
+            }
+        }
+
+        const csvContent = csvRows
+            .map(row => row.map(escapeCsvValue).join(','))
+            .join('\n');
+
+        fs.writeFileSync(EXPORT_FILE, csvContent, 'utf8');
+
+        console.log(`Receipt test summary: ${successCount} succeeded, ${failureCount} failed.`);
+        console.log(`Exported results to ${EXPORT_FILE}`);
     } catch (error) {
-        console.error('Error creating receipt for latest transaction:', error.message);
+        console.error('Error creating receipts for latest transactions:', error.message);
     } finally {
         rl.close();
         await pool.end();
     }
 }
 
-createReceiptForLatestTransaction();
+createReceiptForLatestTransactions();

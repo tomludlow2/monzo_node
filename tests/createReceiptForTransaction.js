@@ -1,7 +1,8 @@
 const { Pool } = require('pg');
 const {
     createTransactionReceipt,
-    getOrCreateReceiptExternalId
+    getOrCreateReceiptExternalId,
+    isReceiptEligible
 } = require('../modules/receipts');
 const readline = require('readline');
 require('dotenv').config();

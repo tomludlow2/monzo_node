@@ -33,36 +33,55 @@ const DISALLOWED_DESCRIPTION_KEYWORDS = [
 ];
 
 async function ensureReceiptsTable() {
-    await pool.query(
-        `CREATE TABLE IF NOT EXISTS monzo_receipts (
-            transaction_id TEXT PRIMARY KEY
-        )`
-    );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS monzo_receipts (
+      transaction_id TEXT
+    )
+  `);
 
-    await pool.query(
-        `ALTER TABLE monzo_receipts
-            ADD COLUMN IF NOT EXISTS external_id TEXT,
-            ADD COLUMN IF NOT EXISTS receipt_id TEXT,
-            ADD COLUMN IF NOT EXISTS payload JSONB,
-            ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
-    );
+  await pool.query(`
+    ALTER TABLE monzo_receipts
+      ADD COLUMN IF NOT EXISTS external_id TEXT,
+      ADD COLUMN IF NOT EXISTS receipt_id TEXT,
+      ADD COLUMN IF NOT EXISTS payload JSONB,
+      ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
 
-    await pool.query(
-        `UPDATE monzo_receipts
-         SET external_id = CONCAT('receipt-', transaction_id)
-         WHERE external_id IS NULL`
-    );
+  // Make sure transaction_id is non-null in existing rows (if any weird historical rows exist)
+  await pool.query(`
+    DELETE FROM monzo_receipts
+    WHERE transaction_id IS NULL
+  `);
 
-    await pool.query(
-        `ALTER TABLE monzo_receipts
-            ALTER COLUMN external_id SET NOT NULL`
-    );
+  await pool.query(`
+    ALTER TABLE monzo_receipts
+      ALTER COLUMN transaction_id SET NOT NULL
+  `);
 
-    await pool.query(
-        `ALTER TABLE monzo_receipts
-            ADD CONSTRAINT IF NOT EXISTS monzo_receipts_external_id_unique UNIQUE (external_id)`
-    );
+  // Ensure external_id populated for historical rows
+  await pool.query(`
+    UPDATE monzo_receipts
+    SET external_id = CONCAT('receipt-', transaction_id)
+    WHERE external_id IS NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE monzo_receipts
+      ALTER COLUMN external_id SET NOT NULL
+  `);
+
+  // ✅ This is what makes ON CONFLICT (transaction_id) valid, even for pre-existing tables
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS monzo_receipts_transaction_id_unique
+    ON monzo_receipts (transaction_id)
+  `);
+
+  // Optional but useful (and avoids your earlier ADD CONSTRAINT IF NOT EXISTS problem)
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS monzo_receipts_external_id_unique
+    ON monzo_receipts (external_id)
+  `);
 }
 
 async function getAccessToken() {

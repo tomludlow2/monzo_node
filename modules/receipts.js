@@ -171,7 +171,7 @@ async function upsertReceiptRecord({ transactionId, externalId, receiptId = null
     );
 }
 
-async function createTransactionReceipt({ transactionId, externalId, total, currency, items }) {
+async function createTransactionReceipt({ transactionId, externalId, total, currency, items, debug = false }) {
     if (!transactionId) {
         throw new Error('transactionId is required to create a receipt.');
     }
@@ -197,12 +197,29 @@ async function createTransactionReceipt({ transactionId, externalId, total, curr
 
     const accessToken = await ensureValidAccessToken();
 
+    const url = 'https://api.monzo.com/transaction-receipts';
+    const headers = {
+        Authorization: `Bearer ${accessToken}`
+    };
+
+    if (debug) {
+        console.log('Monzo receipt request:');
+        console.log(
+            JSON.stringify(
+                {
+                    method: 'PUT',
+                    url,
+                    headers,
+                    data: payload
+                },
+                null,
+                2
+            )
+        );
+    }
+
     try {
-        const response = await axios.put('https://api.monzo.com/transaction-receipts', payload, {
-            headers: {
-                Authorization: `Bearer ${accessToken}`
-            }
-        });
+        const response = await axios.put(url, payload, { headers });
 
         const receiptId = response.data && response.data.receipt_id ? response.data.receipt_id : null;
         await upsertReceiptRecord({
@@ -240,21 +257,39 @@ async function getReceiptByExternalId(externalId) {
     }
 }
 
-async function deleteReceiptByExternalId(externalId) {
+async function deleteReceiptByExternalId(externalId, options = {}) {
     if (!externalId) {
         throw new Error('externalId is required to delete a receipt.');
     }
 
     const accessToken = await ensureValidAccessToken();
+    const { debug = false } = options;
+    const url = 'https://api.monzo.com/transaction-receipts';
+    const headers = {
+        Authorization: `Bearer ${accessToken}`
+    };
+    const params = { external_id: externalId };
+
+    if (debug) {
+        console.log('Monzo receipt delete request:');
+        console.log(
+            JSON.stringify(
+                {
+                    method: 'DELETE',
+                    url,
+                    headers,
+                    params
+                },
+                null,
+                2
+            )
+        );
+    }
 
     try {
-        await axios.delete('https://api.monzo.com/transaction-receipts', {
-            headers: {
-                Authorization: `Bearer ${accessToken}`
-            },
-            params: {
-                external_id: externalId
-            }
+        await axios.delete(url, {
+            headers,
+            params
         });
     } catch (error) {
         throw new Error(formatMonzoErrorMessage(error, 'Delete receipt'));

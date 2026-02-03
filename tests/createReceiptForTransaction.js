@@ -1,7 +1,8 @@
 const { Pool } = require('pg');
 const {
     createTransactionReceipt,
-    getOrCreateReceiptExternalId
+    getOrCreateReceiptExternalId,
+    isReceiptEligible
 } = require('../modules/receipts');
 require('dotenv').config();
 
@@ -16,17 +17,23 @@ const pool = new Pool({
 async function createReceiptForLatestTransaction() {
     try {
         const { rows } = await pool.query(
-            `SELECT transaction_id, amount
+            `SELECT transaction_id, amount, merchant_id, category, description
              FROM monzo_transactions
              ORDER BY date_created DESC
-             LIMIT 1`
+             LIMIT 200`
         );
 
         if (rows.length === 0) {
             throw new Error('No transactions found in monzo_transactions.');
         }
 
-        const { transaction_id: transactionId, amount } = rows[0];
+        const eligibleTransactions = rows.filter(isReceiptEligible);
+
+        if (eligibleTransactions.length === 0) {
+            throw new Error('No receipt-eligible transactions found in monzo_transactions.');
+        }
+
+        const { transaction_id: transactionId, amount } = eligibleTransactions[0];
         const total = Math.abs(Number(amount));
 
         if (!Number.isInteger(total) || total <= 0) {
